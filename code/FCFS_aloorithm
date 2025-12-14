@@ -1,0 +1,57 @@
+#include <bits/stdc++.h>
+using namespace std;
+
+int main() {
+    int n;
+    cout << "Enter number of processes: ";
+    cin >> n;
+
+    vector<int> at(n), bt(n), ct(n), wt(n), tat(n), p(n);
+    int energy_per_unit = 2;
+    vector<int> energy(n);
+
+    for(int i = 0; i < n; i++) {
+        p[i] = i+1;
+        cout << "Process " << p[i] << " Arrival Time: ";
+        cin >> at[i];
+        cout << "Process " << p[i] << " Burst Time: ";
+        cin >> bt[i];
+    }
+
+    // Sort by arrival time
+    vector<int> idx(n);
+    iota(idx.begin(), idx.end(), 0);
+    sort(idx.begin(), idx.end(), [&](int a, int b){
+        return at[a] < at[b];
+    });
+
+    int time = 0;
+    for(int i = 0; i < n; i++) {
+        int id = idx[i];
+        if(time < at[id]) time = at[id];
+        time += bt[id];
+        ct[id] = time;
+        tat[id] = ct[id] - at[id];
+        wt[id] = tat[id] - bt[id];
+        energy[id] = bt[id] * energy_per_unit;
+    }
+
+    cout << "\nFCFS Scheduling Result:\n";
+    cout << "PID\tAT\tBT\tCT\tTAT\tWT\tEnergy\n";
+    float avgWT = 0, avgTAT = 0;
+
+    for(int i = 0; i < n; i++) {
+        cout << p[i] << "\t" << at[i] << "\t" << bt[i] << "\t"
+             << ct[i] << "\t" << tat[i] << "\t" << wt[i]
+             << "\t" << energy[i] << "\n";
+
+        avgWT += wt[i];
+        avgTAT += tat[i];
+    }
+
+    cout << "\nAverage Waiting Time: " << avgWT/n;
+    cout << "\nAverage Turnaround Time: " << avgTAT/n << "\n";
+}
+
+
+
