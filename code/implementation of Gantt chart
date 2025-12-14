@@ -1,0 +1,271 @@
+#include <bits/stdc++.h>
+using namespace std;
+
+struct Process {
+    int pid;
+    int at; 
+    int bt;
+    int priority;
+    int ct, tat, wt, energy;
+};
+
+// Global constants
+int ENERGY_PER_UNIT = 2;
+
+// Utility function to print results
+void printTable(string name, vector<Process> p) {
+    cout << "\n==================== " << name << " ====================\n";
+    cout << "PID\tAT\tBT\tPR\tCT\tTAT\tWT\tEnergy\n";
+
+    double avgWT = 0, avgTAT = 0;
+    for (auto &x : p) {
+        avgWT += x.wt;
+        avgTAT += x.tat;
+        cout << x.pid << "\t" << x.at << "\t" << x.bt << "\t" 
+             << x.priority << "\t" << x.ct << "\t" 
+             << x.tat << "\t" << x.wt 
+             << "\t" << x.energy << "\n";
+    }
+
+    cout << "\nAverage WT: " << avgWT / p.size();
+    cout << "\nAverage TAT: " << avgTAT / p.size() << "\n";
+}
+
+// ---------------------- FCFS --------------------------
+vector<Process> FCFS(vector<Process> p) {
+    sort(p.begin(), p.end(), [&](auto &a, auto &b){ return a.at < b.at; });
+
+    int time = 0;
+    for (auto &x : p) {
+        if (time < x.at) time = x.at;
+        time += x.bt;
+        x.ct = time;
+        x.tat = x.ct - x.at;
+        x.wt = x.tat - x.bt;
+        x.energy = x.bt * ENERGY_PER_UNIT;
+    }
+
+    return p;
+}
+
+// ---------------------- SJF NON-PREEMPTIVE --------------------
+vector<Process> SJFnp(vector<Process> p) {
+    int n = p.size();
+    vector<int> done(n, 0);
+    int time = 0, completed = 0;
+
+    while (completed < n) {
+        int idx = -1, mn = INT_MAX;
+        for (int i = 0; i < n; i++) {
+            if (!done[i] && p[i].at <= time && p[i].bt < mn) {
+                mn = p[i].bt;
+                idx = i;
+            }
+        }
+
+        if (idx == -1) time++;
+        else {
+            time += p[idx].bt;
+            p[idx].ct = time;
+            p[idx].tat = p[idx].ct - p[idx].at;
+            p[idx].wt = p[idx].tat - p[idx].bt;
+            p[idx].energy = p[idx].bt * ENERGY_PER_UNIT;
+            done[idx] = 1;
+            completed++;
+        }
+    }
+    return p;
+}
+
+// ---------------------- SRTF (SJF Preemptive) --------------------
+vector<Process> SRTF(vector<Process> p) {
+    int n = p.size();
+    vector<int> rt(n);
+    for (int i = 0; i < n; i++) rt[i] = p[i].bt;
+
+    int completed = 0, time = 0;
+
+    while (completed < n) {
+        int idx = -1, mn = INT_MAX;
+
+        for (int i = 0; i < n; i++) {
+            if (p[i].at <= time && rt[i] > 0 && rt[i] < mn) {
+                mn = rt[i];
+                idx = i;
+            }
+        }
+
+        if (idx == -1) time++;
+        else {
+            rt[idx]--;
+            time++;
+            if (rt[idx] == 0) {
+                completed++;
+                p[idx].ct = time;
+                p[idx].tat = p[idx].ct - p[idx].at;
+                p[idx].wt = p[idx].tat - p[idx].bt;
+                p[idx].energy = p[idx].bt * ENERGY_PER_UNIT;
+            }
+        }
+    }
+    return p;
+}
+
+// ---------------------- PRIORITY NON-PREEMPTIVE --------------------
+vector<Process> PriorityNP(vector<Process> p) {
+    int n = p.size();
+    vector<int> done(n, 0);
+    int time = 0, completed = 0;
+
+    while (completed < n) {
+        int idx = -1, best = INT_MAX;
+
+        for (int i = 0; i < n; i++) {
+            if(!done[i] && p[i].at <= time && p[i].priority < best) {
+                best = p[i].priority;
+                idx = i;
+            }
+        }
+
+        if (idx == -1) time++;
+        else {
+            time += p[idx].bt;
+            p[idx].ct = time;
+            p[idx].tat = p[idx].ct - p[idx].at;
+            p[idx].wt = p[idx].tat - p[idx].bt;
+            p[idx].energy = p[idx].bt * ENERGY_PER_UNIT;
+            done[idx] = 1;
+            completed++;
+        }
+    }
+    return p;
+}
+
+// ---------------------- PRIORITY PREEMPTIVE --------------------
+vector<Process> PriorityP(vector<Process> p) {
+    int n = p.size();
+    vector<int> rt(n);
+    for(int i = 0; i < n; i++) rt[i] = p[i].bt;
+
+    int completed = 0, time = 0;
+
+    while (completed < n) {
+        int idx = -1, best = INT_MAX;
+
+        for (int i = 0; i < n; i++) {
+            if(p[i].at <= time && rt[i] > 0 && p[i].priority < best) {
+                best = p[i].priority;
+                idx = i;
+            }
+        }
+
+        if(idx == -1) time++;
+        else {
+            rt[idx]--;
+            time++;
+
+            if(rt[idx] == 0) {
+                completed++;
+                p[idx].ct = time;
+                p[idx].tat = p[idx].ct - p[idx].at;
+                p[idx].wt = p[idx].tat - p[idx].bt;
+                p[idx].energy = p[idx].bt * ENERGY_PER_UNIT;
+            }
+        }
+    }
+    return p;
+}
+
+// ---------------------- ROUND ROBIN --------------------
+vector<Process> RR(vector<Process> p, int tq) {
+    int n = p.size();
+    vector<int> rt(n);
+    for(int i = 0; i < n; i++) rt[i] = p[i].bt;
+
+    queue<int> q;
+    vector<bool> inQ(n, false);
+    int completed = 0, time = 0;
+
+    for(int i=0;i<n;i++){
+        if(p[i].at==0){
+            q.push(i);
+            inQ[i]=true;
+        }
+    }
+
+    while(completed < n) {
+        if(q.empty()) {
+            time++;
+            for(int i = 0;i<n;i++){
+                if(p[i].at == time && !inQ[i]) {
+                    q.push(i);
+                    inQ[i] = true;
+                }
+            }
+            continue;
+        }
+
+        int idx = q.front(); q.pop();
+        inQ[idx] = false;
+
+        int exec = min(rt[idx], tq);
+        rt[idx] -= exec;
+        time += exec;
+
+        for(int i = 0;i<n;i++){
+            if(p[i].at > time-exec && p[i].at <= time && rt[i] > 0 && !inQ[i]){
+                q.push(i); inQ[i]=true;
+            }
+        }
+
+        if(rt[idx] > 0){
+            q.push(idx);
+            inQ[idx]=true;
+        } else {
+            completed++;
+            p[idx].ct = time;
+            p[idx].tat = p[idx].ct - p[idx].at;
+            p[idx].wt = p[idx].tat - p[idx].bt;
+            p[idx].energy = p[idx].bt * ENERGY_PER_UNIT;
+        }
+    }
+
+    return p;
+}
+
+// ----------------------------------------------------------
+
+int main() {
+    int n;
+    cout << "Enter number of processes: ";
+    cin >> n;
+
+    vector<Process> proc(n);
+
+    for (int i = 0; i < n; i++) {
+        proc[i].pid = i + 1;
+        cout << "AT for P" << i+1 << ": ";
+        cin >> proc[i].at;
+        cout << "BT for P" << i+1 << ": ";
+        cin >> proc[i].bt;
+        cout << "Priority for P" << i+1 << ": ";
+        cin >> proc[i].priority;
+    }
+
+    int tq;
+    cout << "Enter Time Quantum for RR: ";
+    cin >> tq;
+
+    printTable("FCFS", FCFS(proc));
+    printTable("SJF NON-PREEMPTIVE", SJFnp(proc));
+    printTable("SRTF (SJF PREEMPTIVE)", SRTF(proc));
+    printTable("PRIORITY NON-PREEMPTIVE", PriorityNP(proc));
+    printTable("PRIORITY PREEMPTIVE", PriorityP(proc));
+    printTable("ROUND ROBIN", RR(proc, tq));
+
+    return 0;
+}
+
+
+
+// IN THIS I HAVE UPDATED THE GANTT CHART VERSIONS AND ALSO SOME MINOR ERROR...
