@@ -1,0 +1,167 @@
+PROJECT REPORT
+Energy-Efficient CPU Scheduling Algorithm 
+1.	Project Overview
+Modern computing systems—especially mobile devices and data centers—must reduce power usage while maintaining performance. Traditional CPU scheduling algorithms like FCFS, SJF, Priority, and Round Robin optimize waiting time and turnaround time but do not consider energy consumption.This project implements and analyzes multiple scheduling algorithms along with a new Energy-Efficient CPU Scheduling Algorithm based on SJF + DVFS (Dynamic Voltage and Frequency Scaling). The proposed algorithm switches the CPU between High-Performance, Eco, and Sleep modes depending on the burst time of processes, reducing unnecessary power usage.The system is implemented in C++, with detailed calculations of waiting time, turnaround time, context switches, and energy usage (active + idle + context-switch energy). Results show that the energy-efficient DVFS-based scheduler consumes less energy compared to traditional algorithms while still maintaining good performance.Overall, this project demonstrates how energy-aware scheduling can improve efficiency in modern operating systems and low-power devices.
+
+2.	 Module-Wise Breakdown
+The project is architected into four distinct modules to ensure separation of concerns and scalability:
+🔹 Module A: Process Input & Data Collection
+Handles user input for Arrival Time, Burst Time, Priority, and Time Quantum.
+Prepares and validates process data before sending it to the scheduling engine.
+________________________________________
+•	Module B: Scheduling Algorithms Core
+Implements all scheduling algorithms—FCFS, SJF (NP), SRTF, Priority (NP & P), Round Robin—and the proposed Energy-Efficient SJF + DVFS algorithm.
+Performs CPU mode selection, preemption handling, and computation of CT, TAT, WT.
+________________________________________
+•	Module C: Energy Modeling & Metrics Engine
+Applies the energy model to each Gantt block and computes:
+Active energy, idle/sleep energy, context-switch energy, and total energy usage.
+Also generates performance metrics like averages and context switches.
+________________________________________
+•	Module D: Output & Visualization Layer
+Displays results in tabular form along with Gantt charts.
+Also supports a simple website interface using HTML, CSS, and JavaScript for visual explanation of the project.
+
+3.	Functionalities
+1. Process Input
+•	User enters Arrival Time, Burst Time, Priority, and Time Quantum.
+2. Execution of Scheduling Algorithms
+•	Supports FCFS, SJF (NP), SRTF, Priority (NP & P), Round Robin, and Energy-Efficient SJF with DVFS.
+3. Gantt Chart Generation
+•	Displays execution order, idle times, and CPU power modes.
+4. Performance Metric Calculation
+•	Computes CT, TAT, WT, average values, and context switches.
+5. Energy Consumption Analysis
+•	Calculates active energy, idle/sleep energy, and context switch energy.
+•	Provides total and per-process energy usage.
+6. Algorithm Comparison
+•	Compares traditional algorithms with the energy-efficient approach.
+7. Clear Output Display
+•	Presents results in tables with metrics and Gantt charts.
+
+4.	Technology Used
+1. Programming Language
+•	C++ – used for implementing CPU scheduling algorithms and energy computation logic.
+2. Web Development Technologies
+•	HTML5 – for creating the structure of the website pages.
+•	CSS3 – for styling, layout, and responsive design.
+•	JavaScript – for adding interactivity and dynamic behaviour.
+3. Development Environment
+•	G++ / MinGW / GCC Compiler for C++ program execution.
+•	VS Code / Code::Blocks for development.
+•	Browser (Chrome/Edge) for running and testing the website.
+4. Libraries & Utilities
+•	STL (Standard Template Library) – vectors, queues, sorting, maps.
+•	Console I/O – used for displaying scheduling tables and Gantt charts.
+5. Operating System
+•	The project runs on any OS supporting a C++ compiler and browser:
+Windows, Linux, or MacOS.
+5. Flow Diagram
+Description of Flow:
+
+•	The algorithm selects the process with the shortest burst time (SJF approach).
+•	It checks the burst time and assigns the process to either High-Performance Mode or Eco Mode using DVFS.
+•	After executing the selected process, the scheduler updates all metrics such as CT, TAT, WT, and energy usage.
+•	The cycle repeats until all processes are completely executed.
+
+ 
+
+6. Revision Tracking on GitHub
+The project has been version-controlled to track progress, feature additions, and bug fixes.
+•	Repository Name: 
+•	GitHub Link: 
+7. Conclusion and Future Scope
+This project successfully demonstrates how integrating DVFS with SJF scheduling significantly reduces CPU energy consumption while maintaining good performance. By comparing traditional algorithms with the proposed Energy-Efficient Scheduler, it is evident that intelligent mode switching (High, Eco, Sleep) can lower active and idle energy without increasing waiting or turnaround time. The results prove that energy-aware scheduling is essential for modern low-power and high-efficiency computing systems.
+Future Scope
+•	The model can be extended to include real-time scheduling and deadline-based algorithms for embedded systems.
+•	Machine Learning techniques can be used to predict burst times and dynamically tune power modes.
+•	The system can be expanded into a full GUI-based simulator or integrated into an OS kernel module for real-world testing.
+•	More energy states (Turbo, Deep Sleep) can be added for finer power optimization.
+
+8. References
+•  GeeksforGeeks – CPU Scheduling Algorithms
+https://www.geeksforgeeks.org/cpu-scheduling-in-operating-systems/
+•  TutorialsPoint – Operating System Scheduling
+https://www.tutorialspoint.com/operating_system/os_process_scheduling.htm
+•  StudyTonight – CPU Scheduling Concepts
+https://www.studytonight.com/operating-system/cpu-scheduling
+•  ResearchGate – Energy Efficient Scheduling (papers & studies)
+https://www.researchgate.net/
+
+
+Appendix
+Team Members This project was designed and developed by:
+•	Harsh – 
+•	Pawani Tripathi – 
+•	Manasaa– 
+•	Ayan-
+
+9. Visualization through Website sample
+ 
+
+
+https://id-preview--6c458960-6e15-424b-90d1-5f43da7c7f90.lovable.app/
+
+
+
+
+ 
+
+Code Snippet:-
+
+AlgoResult EnergyEfficient_SJF_DVFS(vector<Process> p) {
+    AlgoResult res;
+    vector<GanttBlock> gantt;
+
+    int n = p.size();
+    vector<int> done(n, 0);
+    int time = 0, completed = 0;
+    int currentPid = -1, currentStart = 0, currentMode = 0;
+
+    while (completed < n) {
+        int idx = -1, mn = INT_MAX;
+        for (int i = 0; i < n; i++) {
+            if (!done[i] && p[i].at <= time && p[i].bt < mn) {
+                mn = p[i].bt;
+                idx = i;
+            }
+        }
+
+        if (idx == -1) {
+            // idle -> sleep mode
+            if (currentPid != 0 || currentMode != 0) {
+                if (currentPid != -1)
+                    gantt.push_back({currentPid, currentStart, time, currentMode});
+                currentPid = 0;
+                currentStart = time;
+                currentMode = 0; // sleep
+            }
+            time++;
+        } else {
+            // decide DVFS mode based on burst time
+            int mode = (p[idx].bt <= SHORT_BURST_THRESHOLD ? 1 : 2); // 1 = HIGH, 2 = ECO
+
+            if (currentPid != p[idx].pid || currentMode != mode) {
+                if (currentPid != -1)
+                    gantt.push_back({currentPid, currentStart, time, currentMode});
+                currentPid = p[idx].pid;
+                currentStart = time;
+                currentMode = mode;
+            }
+
+            time += p[idx].bt;
+            p[idx].ct = time;
+            p[idx].tat = p[idx].ct - p[idx].at;
+            p[idx].wt = p[idx].tat - p[idx].bt;
+            done[idx] = 1;
+            completed++;
+        }
+    }
+
+    if (currentPid != -1)
+        gantt.push_back({currentPid, currentStart, time, currentMode});
+
+    res.p = p;
+    res.gantt = gantt;
+    return res;
+}
