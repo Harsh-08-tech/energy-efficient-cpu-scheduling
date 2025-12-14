@@ -64,6 +64,9 @@ g++ cpu_scheduling.cpp -o run
 
 ---
 
+## Branch Note
+Energy optimization improvements implemented in separate branch.
+
 ## Conclusion
 The Energy Efficient CPU Scheduling Algorithm consumes less energy compared to
 traditional scheduling algorithms while maintaining acceptable performance,
