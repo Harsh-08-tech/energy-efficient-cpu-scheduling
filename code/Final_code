@@ -1,0 +1,626 @@
+#include <bits/stdc++.h>
+using namespace std;
+
+// ===================== Data Structures =====================
+
+struct Process {
+    int pid;
+    int at;
+    int bt;
+    int priority;
+    int ct = 0, tat = 0, wt = 0, energy = 0; // energy will be filled by energy model
+};
+
+// mode: 0 = IDLE/SLEEP, 1 = HIGH performance, 2 = ECO mode
+struct GanttBlock {
+    int pid;   // 0 = IDLE, >0 = process id
+    int start;
+    int end;
+    int mode;
+};
+
+struct AlgoResult {
+    vector<Process> p;
+    vector<GanttBlock> gantt;
+
+    // enriched metrics
+    int contextSwitches = 0;
+    int totalTime = 0;
+    int activeEnergy = 0;
+    int idleEnergy = 0;
+    int totalEnergy = 0; // active + idle + ctx switch
+};
+
+// ===================== Energy Model Constants =====================
+
+// abstract "energy units" (you can call them Joules in report)
+const int POWER_HIGH  = 3;  // performance mode power per time unit
+const int POWER_ECO   = 2;  // eco mode power per time unit (used only in energy-efficient algo)
+const int POWER_SLEEP = 1;  // idle/sleep power per time unit
+const int ENERGY_CTX_SWITCH = 1; // cost per context switch
+
+// DVFS policy threshold (for energy-efficient algo):
+// processes with BT <= SHORT_BURST_THRESHOLD run in HIGH mode (for responsiveness),
+// others in ECO mode (for energy saving).
+const int SHORT_BURST_THRESHOLD = 3;
+
+// ===================== Forward Declarations =====================
+
+AlgoResult FCFS(vector<Process> p);
+AlgoResult SJFnp(vector<Process> p);
+AlgoResult SRTF(vector<Process> p);
+AlgoResult PriorityNP(vector<Process> p);
+AlgoResult PriorityP(vector<Process> p);
+AlgoResult RR(vector<Process> p, int tq);
+AlgoResult EnergyEfficient_SJF_DVFS(vector<Process> p);
+AlgoResult computeEnergyAndContext(AlgoResult res);
+void printResult(const string &name, const AlgoResult &res);
+
+// ===================== FCFS =====================
+
+AlgoResult FCFS(vector<Process> p) {
+    AlgoResult res;
+    vector<GanttBlock> gantt;
+
+    sort(p.begin(), p.end(), [&](auto &a, auto &b) {
+        if (a.at == b.at) return a.pid < b.pid;
+        return a.at < b.at;
+    });
+
+    int time = 0;
+    int currentPid = -1;
+    int currentStart = 0;
+
+    for (auto &x : p) {
+        if (time < x.at) {
+            // idle period
+            if (currentPid != 0) {
+                if (currentPid != -1)
+                    gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+                currentPid = 0;
+                currentStart = time;
+            }
+            time = x.at;
+        }
+        if (currentPid != x.pid) {
+            if (currentPid != -1)
+                gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+            currentPid = x.pid;
+            currentStart = time;
+        }
+        time += x.bt;
+        x.ct = time;
+        x.tat = x.ct - x.at;
+        x.wt = x.tat - x.bt;
+    }
+
+    if (currentPid != -1)
+        gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+
+    res.p = p;
+    res.gantt = gantt;
+    return res;
+}
+
+// ===================== SJF NON-PREEMPTIVE =====================
+
+AlgoResult SJFnp(vector<Process> p) {
+    AlgoResult res;
+    vector<GanttBlock> gantt;
+
+    int n = p.size();
+    vector<int> done(n, 0);
+    int time = 0, completed = 0;
+    int currentPid = -1, currentStart = 0;
+
+    while (completed < n) {
+        int idx = -1, mn = INT_MAX;
+        for (int i = 0; i < n; i++) {
+            if (!done[i] && p[i].at <= time && p[i].bt < mn) {
+                mn = p[i].bt;
+                idx = i;
+            }
+        }
+
+        if (idx == -1) {
+            // idle
+            if (currentPid != 0) {
+                if (currentPid != -1)
+                    gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+                currentPid = 0;
+                currentStart = time;
+            }
+            time++;
+        } else {
+            if (currentPid != p[idx].pid) {
+                if (currentPid != -1)
+                    gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+                currentPid = p[idx].pid;
+                currentStart = time;
+            }
+            time += p[idx].bt;
+            p[idx].ct = time;
+            p[idx].tat = p[idx].ct - p[idx].at;
+            p[idx].wt = p[idx].tat - p[idx].bt;
+            done[idx] = 1;
+            completed++;
+        }
+    }
+
+    if (currentPid != -1)
+        gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+
+    res.p = p;
+    res.gantt = gantt;
+    return res;
+}
+
+// ===================== SRTF (SJF Preemptive) =====================
+
+AlgoResult SRTF(vector<Process> p) {
+    AlgoResult res;
+    vector<GanttBlock> gantt;
+
+    int n = p.size();
+    vector<int> rt(n);
+    for (int i = 0; i < n; i++) rt[i] = p[i].bt;
+
+    int completed = 0, time = 0;
+    int currentPid = -1, currentStart = 0;
+
+    while (completed < n) {
+        int idx = -1, mn = INT_MAX;
+
+        for (int i = 0; i < n; i++) {
+            if (p[i].at <= time && rt[i] > 0 && rt[i] < mn) {
+                mn = rt[i];
+                idx = i;
+            }
+        }
+
+        if (idx == -1) {
+            // idle
+            if (currentPid != 0) {
+                if (currentPid != -1)
+                    gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+                currentPid = 0;
+                currentStart = time;
+            }
+            time++;
+        } else {
+            if (currentPid != p[idx].pid) {
+                if (currentPid != -1)
+                    gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+                currentPid = p[idx].pid;
+                currentStart = time;
+            }
+            rt[idx]--;
+            time++;
+            if (rt[idx] == 0) {
+                completed++;
+                p[idx].ct = time;
+                p[idx].tat = p[idx].ct - p[idx].at;
+                p[idx].wt = p[idx].tat - p[idx].bt;
+            }
+        }
+    }
+
+    if (currentPid != -1)
+        gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+
+    res.p = p;
+    res.gantt = gantt;
+    return res;
+}
+
+// ===================== PRIORITY NON-PREEMPTIVE =====================
+
+AlgoResult PriorityNP(vector<Process> p) {
+    AlgoResult res;
+    vector<GanttBlock> gantt;
+
+    int n = p.size();
+    vector<int> done(n, 0);
+    int time = 0, completed = 0;
+    int currentPid = -1, currentStart = 0;
+
+    while (completed < n) {
+        int idx = -1, best = INT_MAX;
+
+        for (int i = 0; i < n; i++) {
+            if (!done[i] && p[i].at <= time && p[i].priority < best) {
+                best = p[i].priority;
+                idx = i;
+            }
+        }
+
+        if (idx == -1) {
+            // idle
+            if (currentPid != 0) {
+                if (currentPid != -1)
+                    gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+                currentPid = 0;
+                currentStart = time;
+            }
+            time++;
+        } else {
+            if (currentPid != p[idx].pid) {
+                if (currentPid != -1)
+                    gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+                currentPid = p[idx].pid;
+                currentStart = time;
+            }
+            time += p[idx].bt;
+            p[idx].ct = time;
+            p[idx].tat = p[idx].ct - p[idx].at;
+            p[idx].wt = p[idx].tat - p[idx].bt;
+            done[idx] = 1;
+            completed++;
+        }
+    }
+
+    if (currentPid != -1)
+        gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+
+    res.p = p;
+    res.gantt = gantt;
+    return res;
+}
+
+// ===================== PRIORITY PREEMPTIVE =====================
+
+AlgoResult PriorityP(vector<Process> p) {
+    AlgoResult res;
+    vector<GanttBlock> gantt;
+
+    int n = p.size();
+    vector<int> rt(n);
+    for (int i = 0; i < n; i++) rt[i] = p[i].bt;
+
+    int completed = 0, time = 0;
+    int currentPid = -1, currentStart = 0;
+
+    while (completed < n) {
+        int idx = -1, best = INT_MAX;
+
+        for (int i = 0; i < n; i++) {
+            if (p[i].at <= time && rt[i] > 0 && p[i].priority < best) {
+                best = p[i].priority;
+                idx = i;
+            }
+        }
+
+        if (idx == -1) {
+            // idle
+            if (currentPid != 0) {
+                if (currentPid != -1)
+                    gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+                currentPid = 0;
+                currentStart = time;
+            }
+            time++;
+        } else {
+            if (currentPid != p[idx].pid) {
+                if (currentPid != -1)
+                    gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+                currentPid = p[idx].pid;
+                currentStart = time;
+            }
+            rt[idx]--;
+            time++;
+            if (rt[idx] == 0) {
+                completed++;
+                p[idx].ct = time;
+                p[idx].tat = p[idx].ct - p[idx].at;
+                p[idx].wt = p[idx].tat - p[idx].bt;
+            }
+        }
+    }
+
+    if (currentPid != -1)
+        gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+
+    res.p = p;
+    res.gantt = gantt;
+    return res;
+}
+
+// ===================== ROUND ROBIN =====================
+
+AlgoResult RR(vector<Process> p, int tq) {
+    AlgoResult res;
+    vector<GanttBlock> gantt;
+
+    int n = p.size();
+    vector<int> rt(n);
+    for (int i = 0; i < n; i++) rt[i] = p[i].bt;
+
+    queue<int> q;
+    vector<bool> inQ(n, false);
+    int completed = 0, time = 0;
+
+    // initial arrivals at time 0
+    for (int i = 0; i < n; i++) {
+        if (p[i].at == 0) {
+            q.push(i);
+            inQ[i] = true;
+        }
+    }
+
+    int currentPid = -1, currentStart = 0;
+
+    while (completed < n) {
+        if (q.empty()) {
+            // idle
+            if (currentPid != 0) {
+                if (currentPid != -1)
+                    gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+                currentPid = 0;
+                currentStart = time;
+            }
+            time++;
+            for (int i = 0; i < n; i++) {
+                if (p[i].at == time && !inQ[i] && rt[i] > 0) {
+                    q.push(i);
+                    inQ[i] = true;
+                }
+            }
+            continue;
+        }
+
+        int idx = q.front(); q.pop();
+        inQ[idx] = false;
+
+        if (currentPid != p[idx].pid) {
+            if (currentPid != -1)
+                gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+            currentPid = p[idx].pid;
+            currentStart = time;
+        }
+
+        int exec = min(tq, rt[idx]);
+        rt[idx] -= exec;
+        int oldTime = time;
+        time += exec;
+
+        // new arrivals during this time
+        for (int i = 0; i < n; i++) {
+            if (p[i].at > oldTime && p[i].at <= time && rt[i] > 0 && !inQ[i]) {
+                q.push(i);
+                inQ[i] = true;
+            }
+        }
+
+        if (rt[idx] > 0) {
+            q.push(idx);
+            inQ[idx] = true;
+        } else {
+            completed++;
+            p[idx].ct = time;
+            p[idx].tat = p[idx].ct - p[idx].at;
+            p[idx].wt = p[idx].tat - p[idx].bt;
+        }
+    }
+
+    if (currentPid != -1)
+        gantt.push_back({currentPid, currentStart, time, (currentPid == 0 ? 0 : 1)});
+
+    res.p = p;
+    res.gantt = gantt;
+    return res;
+}
+
+// ===================== ENERGY-EFFICIENT SJF + DVFS =====================
+//
+// Non-preemptive SJF scheduling,
+// BUT with DVFS:
+//   - short jobs (BT <= SHORT_BURST_THRESHOLD) in PERFORMANCE mode (POWER_HIGH)
+//   - long jobs in ECO mode (POWER_ECO)
+// Idle gaps -> SLEEP mode (POWER_SLEEP)
+// Context switches counted the same way as others.
+
+AlgoResult EnergyEfficient_SJF_DVFS(vector<Process> p) {
+    AlgoResult res;
+    vector<GanttBlock> gantt;
+
+    int n = p.size();
+    vector<int> done(n, 0);
+    int time = 0, completed = 0;
+    int currentPid = -1, currentStart = 0, currentMode = 0;
+
+    while (completed < n) {
+        int idx = -1, mn = INT_MAX;
+        for (int i = 0; i < n; i++) {
+            if (!done[i] && p[i].at <= time && p[i].bt < mn) {
+                mn = p[i].bt;
+                idx = i;
+            }
+        }
+
+        if (idx == -1) {
+            // idle -> sleep mode
+            if (currentPid != 0 || currentMode != 0) {
+                if (currentPid != -1)
+                    gantt.push_back({currentPid, currentStart, time, currentMode});
+                currentPid = 0;
+                currentStart = time;
+                currentMode = 0; // sleep
+            }
+            time++;
+        } else {
+            // decide DVFS mode based on burst time
+            int mode = (p[idx].bt <= SHORT_BURST_THRESHOLD ? 1 : 2); // 1 = HIGH, 2 = ECO
+
+            if (currentPid != p[idx].pid || currentMode != mode) {
+                if (currentPid != -1)
+                    gantt.push_back({currentPid, currentStart, time, currentMode});
+                currentPid = p[idx].pid;
+                currentStart = time;
+                currentMode = mode;
+            }
+
+            time += p[idx].bt;
+            p[idx].ct = time;
+            p[idx].tat = p[idx].ct - p[idx].at;
+            p[idx].wt = p[idx].tat - p[idx].bt;
+            done[idx] = 1;
+            completed++;
+        }
+    }
+
+    if (currentPid != -1)
+        gantt.push_back({currentPid, currentStart, time, currentMode});
+
+    res.p = p;
+    res.gantt = gantt;
+    return res;
+}
+
+// ===================== ENERGY & CONTEXT-SWITCH COMPUTATION =====================
+
+AlgoResult computeEnergyAndContext(AlgoResult res) {
+    int n = res.p.size();
+    if (n == 0 || res.gantt.empty()) return res;
+
+    // pid -> index in res.p
+    unordered_map<int,int> idxOfPid;
+    for (int i = 0; i < n; i++) {
+        idxOfPid[res.p[i].pid] = i;
+        res.p[i].energy = 0; // reset
+    }
+
+    res.contextSwitches = 0;
+    res.totalTime = 0;
+    res.activeEnergy = 0;
+    res.idleEnergy = 0;
+    res.totalEnergy = 0;
+
+    int lastPid = -1;
+
+    for (auto &g : res.gantt) {
+        int dur = g.end - g.start;
+        if (dur <= 0) continue;
+        res.totalTime += dur;
+
+        if (g.pid == 0) {
+            // IDLE / SLEEP
+            int eIdle = dur * POWER_SLEEP;
+            res.idleEnergy += eIdle;
+            res.totalEnergy += eIdle;
+            lastPid = 0;
+        } else {
+            int idx = idxOfPid[g.pid];
+            int power = POWER_HIGH; // default
+            if (g.mode == 2) power = POWER_ECO; // eco mode
+            // mode 1 -> HIGH, 2 -> ECO
+
+            int eAct = dur * power;
+            res.activeEnergy += eAct;
+            res.totalEnergy += eAct;
+            res.p[idx].energy += eAct;
+
+            // context switch: any change from previous non -1 pid
+            if (lastPid != -1 && lastPid != g.pid) {
+                res.contextSwitches++;
+                res.totalEnergy += ENERGY_CTX_SWITCH;
+                res.p[idx].energy += ENERGY_CTX_SWITCH;
+            }
+            lastPid = g.pid;
+        }
+    }
+
+    return res;
+}
+
+// ===================== PRINT RESULT (TABLE + STATS + GANTT) =====================
+
+void printResult(const string &name, const AlgoResult &res) {
+    auto p = res.p;
+    cout << "\n==================== " << name << " ====================\n";
+    cout << "PID\tAT\tBT\tPR\tCT\tTAT\tWT\tEnergy\n";
+
+    double avgWT = 0, avgTAT = 0;
+    int totalProcEnergy = 0;
+
+    for (auto &x : p) {
+        avgWT += x.wt;
+        avgTAT += x.tat;
+        totalProcEnergy += x.energy;
+        cout << x.pid << "\t" << x.at << "\t" << x.bt << "\t"
+             << x.priority << "\t" << x.ct << "\t"
+             << x.tat << "\t" << x.wt << "\t" << x.energy << "\n";
+    }
+
+    cout << "\nAverage Waiting Time: " << (avgWT / p.size());
+    cout << "\nAverage Turnaround Time: " << (avgTAT / p.size());
+
+    cout << "\nContext Switches: " << res.contextSwitches;
+    cout << "\nActive Energy (sum of processes): " << totalProcEnergy;
+    cout << "\nIdle/Sleep Energy: " << res.idleEnergy;
+    cout << "\nTotal Energy Used (Active + Idle + ContextSwitch): " << res.totalEnergy << "\n";
+
+    // Gantt Chart
+    cout << "\nGantt Chart (Execution Order):\n";
+    if (res.gantt.empty()) {
+        cout << "No Gantt data.\n";
+        return;
+    }
+
+    // First line: blocks
+    for (auto &g : res.gantt) {
+        string label;
+        if (g.pid == 0) label = "IDLE";
+        else label = "P" + to_string(g.pid);
+        cout << "| " << label << " ";
+    }
+    cout << "|\n";
+
+    // Second line: timeline
+    cout << res.gantt[0].start;
+    for (auto &g : res.gantt) {
+        cout << "\t" << g.end;
+    }
+    cout << "\n";
+}
+
+// ===================== MAIN =====================
+
+int main() {
+    int n;
+    cout << "Enter number of processes: ";
+    cin >> n;
+
+    if (n <= 0) {
+        cout << "Invalid number of processes.\n";
+        return 0;
+    }
+
+    vector<Process> proc(n);
+
+    for (int i = 0; i < n; i++) {
+        proc[i].pid = i + 1;
+        cout << "Arrival Time (AT) for P" << i+1 << ": ";
+        cin >> proc[i].at;
+        cout << "Burst Time (BT) for P" << i+1 << ": ";
+        cin >> proc[i].bt;
+        cout << "Priority for P" << i+1 << " (lower = higher): ";
+        cin >> proc[i].priority;
+    }
+
+    int tq;
+    cout << "Enter Time Quantum for Round Robin: ";
+    cin >> tq;
+    if (tq <= 0) tq = 1;
+
+    // Run algorithms + compute energy + print
+    printResult("FCFS",                  computeEnergyAndContext(FCFS(proc)));
+    printResult("SJF NON-PREEMPTIVE",    computeEnergyAndContext(SJFnp(proc)));
+    printResult("SRTF (SJF PREEMPTIVE)", computeEnergyAndContext(SRTF(proc)));
+    printResult("PRIORITY NON-PREEMPTIVE", computeEnergyAndContext(PriorityNP(proc)));
+    printResult("PRIORITY PREEMPTIVE",   computeEnergyAndContext(PriorityP(proc)));
+    printResult("ROUND ROBIN",           computeEnergyAndContext(RR(proc, tq)));
+    printResult("ENERGY-EFFICIENT SJF + DVFS",
+                computeEnergyAndContext(EnergyEfficient_SJF_DVFS(proc)));
+
+    return 0;
+}
